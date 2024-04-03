@@ -1,17 +1,6 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Feb 21 12:20:38 2024
-
-@author: Administrator
-"""
-
 import numpy as np
 import math
 import os
-from mpl_toolkits import mplot3d
-import pylab as pl
-from IPython import display
-import matplotlib.pyplot as plt
 
 
 # parameter
@@ -88,22 +77,6 @@ for i in range(int(n / 3)):
 # mass and charge arrays
 mm = np.array([m[tp[j]] for j in range(n)])
 chrg = np.array([qs[tp[j]] for j in range(n)])
-
-
-# make particles reflect off boundaries
-def reflectBC(r, v):
-    newv = 1.0 * v
-    newr = 1.0 * r
-    for i in range(n):
-        for j in range(D):
-            if newr[i][j] < 0:
-                newr[i][j] = -newr[i][j]
-                newv[i][j] = abs(v[i][j])
-            if newr[i][j] > L[j]:
-                newr[i][j] = 2.0 * L[j] - newr[i][j]
-                newv[i][j] = -abs(v[i][j])
-    return newr, newv
-
 
 # Lennard-Jones potential
 # Given particle index, i, returns potential it feels from other particles
@@ -250,23 +223,12 @@ def coul(r, i, chrgs):
     Fs = np.sum(FF, axis=0)
     return Fs
 
+# =============================================================================
+# Output
+# =============================================================================
 
-# rescale temperature
-def rescaleT(v, T):
-    KE = 0.5 * sum(sum(mm * np.transpose(v * v)))
-    avKE = KE / n
-    Tnow = (2.0 / 3) * avKE / kb
-    lam = np.sqrt(T / Tnow)
-    lam = (lam - 1.0) * 0.5 + 1.0  # update slowly
-    vnew = lam * v
-    return vnew
-
-
-# dump
 def dump(r, t):
     """
-
-
     Parameters
     ----------
     r : TYPE
@@ -307,9 +269,33 @@ def dump(r, t):
         )
     f.close
 
+# =============================================================================
+# Boundary conditions
+# =============================================================================
 
-# Update subroutines
-def updatev(r, v, dt, sigg, epss):
+def BC_periodic(position, velocity):
+    position_new = position % L
+    velocity_new = 1.0 * velocity
+    return position_new, velocity_new
+
+def BC_reflective(position, velocity):
+    velocity_new = 1.0 * velocity
+    position_new = 1.0 * position
+    for i in range(n):
+        for j in range(D):
+            if position_new[i][j] < 0:
+                position_new[i][j] = -position_new[i][j]
+                velocity_new[i][j] = abs(velocity[i][j])
+            if position_new[i][j] > L[j]:
+                position_new[i][j] = 2.0 * L[j] - position_new[i][j]
+                velocity_new[i][j] = -abs(velocity[i][j])
+    return position_new, velocity_new
+
+# =============================================================================
+# Particle state updaters
+# =============================================================================
+
+def update_velocity(r, v, dt, sigg, epss):
     # calculate acceleration:
     F = -np.array([dLJp(r, i, sigg[tp[i]], epss[tp[i]], bnd) for i in range(n)])  # LJ
     F = F - dBEpot(r, bnd)  # Bonds
@@ -320,23 +306,36 @@ def updatev(r, v, dt, sigg, epss):
     newv = v + dt * a
     return newv, a
 
+def rescale_velocity(v, T):
+    KE = 0.5 * sum(sum(mm * np.transpose(v * v)))
+    avKE = KE / n
+    Tnow = (2.0 / 3) * avKE / kb
+    lam = np.sqrt(T / Tnow)
+    lam = (lam - 1.0) * 0.5 + 1.0  # update slowly
+    vnew = lam * v
+    return vnew
 
-def update(r, v, dt):
-    newr = r + dt * v
+def update_position(position, velocity, dt):
+    position_new = position + dt * velocity
     if BC == 0:
-        newr = newr % L
-        newv = 1.0 * v
+        position_new, velocity_new = BC_periodic(position_new, velocity)
     if BC == 1:
-        newr, newv = reflectBC(newr, v)
-    return newr, newv
+        position_new, velocity_new = BC_reflective(position_new, velocity)
+    return position_new, velocity_new
 
+# =============================================================================
+# MAIN
+# =============================================================================
 
 skip = 20
 STEPS = 50 * skip
 for i in range(STEPS):
-    v, a = updatev(r, v, dt, sig, eps)  # update velocity
-    v = rescaleT(v, T0)  # scale to temperature
-    r, v = update(r, v, dt)  # update position
+    # Update particle states
+    v, a = update_velocity(r, v, dt, sig, eps)
+    v = rescale_velocity(v, T0)
+    r, v = update_position(r, v, dt)
+    
+    # Dump output?
     if i % skip == 0:
         dump(r, int(i / skip))
         print(int(i / skip))
